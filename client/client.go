@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -26,9 +25,8 @@ const (
 )
 
 var (
-	HOST          = "i:80"
-	ErrWsPoolSize = errors.New("WsPoolSize must be set")
-	ErrWsInit     = errors.New("Cannot init even one ws!")
+	HOST      = "i:80"
+	ErrWsInit = errors.New("Cannot init ws!")
 )
 
 type Client struct {
@@ -36,16 +34,13 @@ type Client struct {
 	Server       string
 	PingPeriod   time.Duration
 	Dialer       websocket.Dialer
-	WsPoolSize   int
 	BufSize      int
 	h2Transport  http.RoundTripper
 	h2ReverseReq http.Request
-	seqmu        sync.Mutex
-	seq          int
 }
 
 func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
-	ws, _, err := client.Dialer.Dial(client.Server, nil)
+	ws, _, err := client.Dialer.Dial(fmt.Sprintf("ws://%s/h2p", client.Server), nil)
 	if err != nil {
 		glog.Errorln(err)
 		return nil, err
@@ -59,8 +54,8 @@ func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (net.C
 	}()
 
 	pc := NewWs(ws, client.BufSize, client.PingPeriod)
-	u, _ := parseURL(client.Server)
-	_, hostNoPort := hostPortNoPort(u)
+	u := url.URL{Host: client.Server}
+	_, hostNoPort := hostPortNoPort(&u)
 	cfg.ServerName = hostNoPort
 	cn := tls.Client(pc, cfg)
 
@@ -93,35 +88,30 @@ func (client *Client) newH2Transport() http.RoundTripper {
 	}
 }
 
-func (client *Client) initWsPool() error {
-	if client.WsPoolSize == 0 {
-		return ErrWsPoolSize
-	}
-	rawReq := []byte(fmt.Sprintf("GET http://%s/ HTTP/1.1\r\nHost: %s\r\n\r\n", HOST, HOST))
-	var success int
-	for i := 0; i < client.WsPoolSize+2; i++ {
-		cc, cs := net.Pipe()
-		go func() {
-			var resBuf bytes.Buffer
-			resReader := bufio.NewReader(io.TeeReader(cc, &resBuf))
-			if res, err := http.ReadResponse(resReader, nil); err != nil {
-				glog.Errorln("Init Ws pool err:", err)
-			} else if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusFound {
-				glog.Infoln(res.StatusCode)
-				success++
-			} else {
-				glog.Infoln(resBuf.String())
-			}
-		}()
-		go func() {
-			cc.Write(rawReq)
-		}()
-		client.connect(cs)
-	}
-	if success == 0 {
-		return ErrWsInit
-	}
-	return nil
+func (client *Client) initWs() (err error) {
+	cc, cs := net.Pipe()
+
+	go func() {
+		var resBuf bytes.Buffer
+		resReader := bufio.NewReader(io.TeeReader(cc, &resBuf))
+		if res, rerr := http.ReadResponse(resReader, nil); rerr != nil {
+			glog.Errorln("Init Ws err:", rerr)
+			err = rerr
+		} else if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusFound {
+			glog.Infoln(res.StatusCode)
+		} else {
+			glog.Infoln(resBuf.String())
+			err = ErrWsInit
+		}
+	}()
+
+	go func() {
+		rawReq := []byte(fmt.Sprintf("GET http://%s/ HTTP/1.1\r\nHost: %s\r\n\r\n", HOST, HOST))
+		cc.Write(rawReq)
+	}()
+
+	client.connect(cs)
+	return
 }
 
 func (client *Client) Run(ok chan<- struct{}) error {
@@ -129,7 +119,7 @@ func (client *Client) Run(ok chan<- struct{}) error {
 		return err
 	}
 	client.h2Transport = client.newH2Transport()
-	if err := client.initWsPool(); err != nil {
+	if err := client.initWs(); err != nil {
 		return err
 	}
 
@@ -171,6 +161,7 @@ func (client *Client) initReverseRequest() error {
 	if err != nil {
 		return err
 	}
+	u.Opaque = ""
 	u.Scheme = "https"
 	u.Path = "/r"
 	client.h2ReverseReq = http.Request{
@@ -198,32 +189,11 @@ func (client *Client) newReverseRequest(requestURI string) (*http.Request, error
 	return &req, nil
 }
 
-func (client *Client) nextAddr() string {
-	client.seqmu.Lock()
-	defer client.seqmu.Unlock()
-	client.seq++
-	client.seq %= client.WsPoolSize
-	return fmt.Sprintf("wsh2.addr:%d", client.seq)
-}
-
 // golang/x/net/http2
-//
-// maxConcurrentStreams = 1
 //
 // @@ RoundTripOpt
 // - addr := authorityAddr(req.URL.Host)
 // + addr := req.RemoteAddr
-//
-// @@ func (cc *ClientConn) RoundTrip
-// - if gotResHeaders != nil {
-// + if gotResHeaders != nil && !(req.Method == "CONNECT" && re.res.StatusCode == http.StatusOK) {
-//
-// @@ writeRequestBody
-// - n, err := io.ReadFull(body, buf)
-// + n, err := body.Read(buf)
-//
-//   err = cc.fr.WriteData(cs.ID, sentEnd, data)
-// + cc.bw.Flush()
 //
 // +++>
 //	go cc.readLoop()
@@ -288,17 +258,17 @@ func (client *Client) connect(c net.Conn) {
 	var req *http.Request
 	if isConnect {
 		if req, err = http.ReadRequest(bufConn); err != nil {
+			glog.Errorln(err)
 			return
 		}
 		req.Host, _ = hostPortNoPort(req.URL)
-		req.URL.Opaque = "/c"
 	} else {
 		if req, err = client.newReverseRequest(requestURI); err != nil {
 			glog.Errorln(err)
 			return
 		}
 	}
-	req.RemoteAddr = client.nextAddr()
+	req.RemoteAddr = client.Server // This field is ignored by the HTTP client.
 	req.URL.Scheme = "https"
 	req.ContentLength = -1
 	if isConnect {
@@ -378,47 +348,6 @@ func peekRequestLine(r *bufio.Reader) ([]byte, error) {
 }
 
 // from gorilla
-var errMalformedURL = errors.New("malformed ws or wss URL")
-
-// parseURL parses the URL. The url.Parse function is not used here because
-// url.Parse mangles the path.
-func parseURL(s string) (*url.URL, error) {
-	// From the RFC:
-	//
-	// ws-URI = "ws:" "//" host [ ":" port ] path [ "?" query ]
-	// wss-URI = "wss:" "//" host [ ":" port ] path [ "?" query ]
-	//
-	// We don't use the net/url parser here because the dialer interface does
-	// not provide a way for applications to work around percent deocding in
-	// the net/url parser.
-
-	var u url.URL
-	switch {
-	case strings.HasPrefix(s, "ws://"):
-		u.Scheme = "ws"
-		s = s[len("ws://"):]
-	case strings.HasPrefix(s, "wss://"):
-		u.Scheme = "wss"
-		s = s[len("wss://"):]
-	default:
-		return nil, errMalformedURL
-	}
-
-	u.Host = s
-	u.Opaque = "/"
-	if i := strings.Index(s, "/"); i >= 0 {
-		u.Host = s[:i]
-		u.Opaque = s[i:]
-	}
-
-	if strings.Contains(u.Host, "@") {
-		// WebSocket URIs do not contain user information.
-		return nil, errMalformedURL
-	}
-
-	return &u, nil
-}
-
 func hostPortNoPort(u *url.URL) (hostPort, hostNoPort string) {
 	hostPort = u.Host
 	hostNoPort = u.Host

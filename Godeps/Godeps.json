@@ -1,0 +1,57 @@
+{
+	"ImportPath": "github.com/empirefox/wsh2c",
+	"GoVersion": "go1.6",
+	"Deps": [
+		{
+			"ImportPath": "github.com/codahale/chacha20",
+			"Rev": "7be6a955b0468becb6aaa609b484b52fbf355b76"
+		},
+		{
+			"ImportPath": "github.com/cyfdecyf/bufio",
+			"Rev": "9601756e2a6b5fa8ca6749ce4f73f6afdd83030d"
+		},
+		{
+			"ImportPath": "github.com/cyfdecyf/color",
+			"Rev": "31d518c963d22b95d500ab628c1d1d1b8eff2ab9"
+		},
+		{
+			"ImportPath": "github.com/cyfdecyf/leakybuf",
+			"Comment": "1.0",
+			"Rev": "ffae040843bee2891b6306d1d085c25ca822e72c"
+		},
+		{
+			"ImportPath": "github.com/empirefox/cow",
+			"Comment": "0.9.6-2-g86ff965",
+			"Rev": "86ff9653ff5b2304b6117e7511d7d10371aa7c8c"
+		},
+		{
+			"ImportPath": "github.com/golang/glog",
+			"Rev": "fca8c8854093a154ff1eb580aae10276ad6b1b5f"
+		},
+		{
+			"ImportPath": "github.com/gorilla/websocket",
+			"Rev": "4935ba31a2adbfcd9e08b86d2657659afbf1af9a"
+		},
+		{
+			"ImportPath": "github.com/shadowsocks/shadowsocks-go/shadowsocks",
+			"Comment": "1.1.4",
+			"Rev": "4a4293907b1641ac4b00ca70cae0d2a88611ecd9"
+		},
+		{
+			"ImportPath": "golang.org/x/crypto/blowfish",
+			"Rev": "1f22c0103821b9390939b6776727195525381532"
+		},
+		{
+			"ImportPath": "golang.org/x/crypto/cast5",
+			"Rev": "1f22c0103821b9390939b6776727195525381532"
+		},
+		{
+			"ImportPath": "golang.org/x/crypto/salsa20/salsa",
+			"Rev": "1f22c0103821b9390939b6776727195525381532"
+		},
+		{
+			"ImportPath": "golang.org/x/net/http2",
+			"Rev": "0899459b4d84739aa2600ba248120318d78f8997"
+		}
+	]
+}
