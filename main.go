@@ -30,7 +30,8 @@ var (
 )
 
 func init() {
-	flag.Set("stderrthreshold", "INFO")
+	flag.Set("stderrthreshold", "ERROR")
+	flag.Set("logtostderr", "true")
 }
 
 func main() {
@@ -65,7 +66,7 @@ func servLocal() {
 	parser.ParseProxy("http://127.0.0.1:" + *parentPort)
 	parser.ParseListen("http://0.0.0.0:" + *localPort)
 	cow.Start(func(config *cow.Config) {
-		if err := os.MkdirAll(filepath.Dir(config.RcFile), os.ModePerm); err != nil {
+		if err := os.MkdirAll(filepath.Dir(config.RcFile), os.ModePerm); os.IsNotExist(err) {
 			glog.Fatalln(err)
 		}
 		config.RcFile = ""
