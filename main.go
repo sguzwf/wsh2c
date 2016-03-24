@@ -30,7 +30,7 @@ var (
 )
 
 func init() {
-	flag.Set("stderrthreshold", "ERROR")
+	//	flag.Set("stderrthreshold", "INFO")
 	flag.Set("logtostderr", "true")
 }
 

@@ -195,42 +195,6 @@ func (client *Client) newReverseRequest(requestURI string) (*http.Request, error
 // - addr := authorityAddr(req.URL.Host)
 // + addr := req.RemoteAddr
 //
-// +++>
-//	go cc.readLoop()
-//	go cc.pingLoop()
-//	return cc, nil
-//}
-//
-//func (cc *ClientConn) pingLoop() {
-//	var data [8]byte
-//	ticker := time.NewTicker(time.Second * 48)
-//	defer ticker.Stop()
-//	for {
-//		select {
-//		case <-cc.readerDone:
-//			glog.Infoln("ClientConn readerDone")
-//			return
-//		case <-ticker.C:
-//			sec := strconv.FormatInt(time.Now().Unix(), 36) + "__"
-//			copy(data[:], sec[:8])
-//			if err := cc.writePing(data); err != nil {
-//				glog.Errorln(err)
-//				return
-//			}
-//		}
-//	}
-//}
-//
-//func (cc *ClientConn) writePing(data [8]byte) error {
-//	cc.wmu.Lock()
-//	defer cc.wmu.Unlock()
-//	if err := cc.fr.WritePing(false, data); err != nil {
-//		return err
-//	}
-//	return cc.bw.Flush()
-//}
-// +++<
-//
 // Another implements https://github.com/fangdingjun/net
 // For now we choose smallest modification for original code
 func (client *Client) connect(c net.Conn) {
@@ -238,7 +202,7 @@ func (client *Client) connect(c net.Conn) {
 		if err := recover(); err != nil {
 			glog.Errorln(err)
 		}
-		glog.Infoln("proxy conn closed")
+		//		glog.Infoln("proxy conn closed")
 	}()
 	defer c.Close()
 

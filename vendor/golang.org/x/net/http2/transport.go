@@ -24,8 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
-
 	"golang.org/x/net/http2/hpack"
 )
 
@@ -335,8 +333,12 @@ func (t *Transport) newTLSConfig(host string) *tls.Config {
 	if t.TLSClientConfig != nil {
 		*cfg = *t.TLSClientConfig
 	}
-	cfg.NextProtos = []string{NextProtoTLS} // TODO: don't override if already in list
-	cfg.ServerName = host
+	if !strSliceContains(cfg.NextProtos, NextProtoTLS) {
+		cfg.NextProtos = append([]string{NextProtoTLS}, cfg.NextProtos...)
+	}
+	if cfg.ServerName == "" {
+		cfg.ServerName = host
+	}
 	return cfg
 }
 
@@ -416,8 +418,8 @@ func (t *Transport) NewClientConn(c net.Conn) (*ClientConn, error) {
 	}
 
 	initialSettings := []Setting{
-		Setting{ID: SettingEnablePush, Val: 0},
-		Setting{ID: SettingInitialWindowSize, Val: transportDefaultStreamFlow},
+		{ID: SettingEnablePush, Val: 0},
+		{ID: SettingInitialWindowSize, Val: transportDefaultStreamFlow},
 	}
 	if max := t.maxHeaderListSize(); max != 0 {
 		initialSettings = append(initialSettings, Setting{ID: SettingMaxHeaderListSize, Val: max})
@@ -458,37 +460,7 @@ func (t *Transport) NewClientConn(c net.Conn) (*ClientConn, error) {
 	})
 
 	go cc.readLoop()
-	go cc.pingLoop()
 	return cc, nil
-}
-
-func (cc *ClientConn) pingLoop() {
-	var data [8]byte
-	ticker := time.NewTicker(time.Second * 48)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-cc.readerDone:
-			glog.Infoln("ClientConn readerDone")
-			return
-		case <-ticker.C:
-			sec := strconv.FormatInt(time.Now().Unix(), 36) + "__"
-			copy(data[:], sec[:8])
-			if err := cc.writePing(data); err != nil {
-				glog.Errorln(err)
-				return
-			}
-		}
-	}
-}
-
-func (cc *ClientConn) writePing(data [8]byte) error {
-	cc.wmu.Lock()
-	defer cc.wmu.Unlock()
-	if err := cc.fr.WritePing(false, data); err != nil {
-		return err
-	}
-	return cc.bw.Flush()
 }
 
 func (cc *ClientConn) setGoAway(f *GoAwayFrame) {
