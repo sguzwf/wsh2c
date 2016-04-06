@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/net/http2"
 
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/websocket"
 )
 
@@ -42,13 +42,21 @@ type Client struct {
 	pacTpl       *template.Template
 }
 
-func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
+func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (c net.Conn, err error) {
+	if c, err = client.dialProxyTLS(network, addr, cfg); err != nil {
+		log.WithFields(log.Fields{
+			"server":     client.Server,
+			"tls.server": cfg.ServerName,
+		}).Errorln(err)
+	}
+	return
+}
+
+func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
 	ws, _, err := client.Dialer.Dial(fmt.Sprintf("ws://%s/h2p", client.Server), nil)
 	if err != nil {
-		glog.Errorln(err)
 		return nil, err
 	}
-	glog.Infoln("lower websocket ready")
 	closeWs := ws
 	defer func() {
 		if closeWs != nil {
@@ -78,7 +86,7 @@ func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (net.C
 		return nil, errors.New("http2: could not negotiate protocol mutually")
 	}
 	closeWs = nil
-	glog.Infoln("DailTLS ok")
+	log.Infoln("DailTLS ok")
 	return cn, nil
 }
 
@@ -98,7 +106,6 @@ func (client *Client) initWs() (err error) {
 		var resBuf bytes.Buffer
 		resReader := bufio.NewReader(io.TeeReader(cc, &resBuf))
 		if res, rerr := http.ReadResponse(resReader, nil); rerr != nil {
-			glog.Errorln("Init Ws err:", rerr)
 			err = rerr
 		} else if res.StatusCode == http.StatusOK {
 			defer res.Body.Close()
@@ -108,7 +115,7 @@ func (client *Client) initWs() (err error) {
 				client.pacTpl = template.Must(template.New("pac").Parse(string(body)))
 			}
 		} else {
-			glog.Infoln(resBuf.String())
+			log.Infoln(resBuf.String())
 			err = ErrWsInit
 		}
 	}()
@@ -136,7 +143,7 @@ func (client *Client) Run() error {
 		return err
 	}
 	defer l.Close()
-	fmt.Println(">>>>>>>>>>>>>>> OK our proxy is on port", client.Port)
+	fmt.Println(">>>>>>>>>>>>>>> OK proxy is on port", client.Port)
 	fmt.Println(">>>>>>>>>>>>>>> Enjoy your life now!")
 
 	var tempDelay time.Duration // how long to sleep on accept failure
@@ -152,7 +159,7 @@ func (client *Client) Run() error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				glog.Infoln("http: Accept error: %v; retrying in %v\n", e, tempDelay)
+				log.Infoln("http: Accept error: %v; retrying in %v\n", e, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -196,6 +203,8 @@ func (client *Client) newReverseRequest(requestURI string) (*http.Request, error
 	return &req, nil
 }
 
+func (client *Client) Connect(c net.Conn) {}
+
 // golang/x/net/http2
 //
 // @@ RoundTripOpt
@@ -207,23 +216,22 @@ func (client *Client) newReverseRequest(requestURI string) (*http.Request, error
 func (client *Client) connect(c net.Conn) {
 	defer func() {
 		if err := recover(); err != nil {
-			glog.Errorln(err)
+			log.Errorln(err)
 		}
-		//		glog.Infoln("proxy conn closed")
 	}()
 	defer c.Close()
 
 	bufConn := bufio.NewReader(c)
 	requestLine, err := peekRequestLine(bufConn)
 	if err != nil {
-		glog.Errorln(err)
+		log.Infoln(err)
 		return
 	}
 
 	// pac
 	if bytes.HasPrefix(requestLine, PacReqPrefix) {
 		if err := client.pacTpl.Execute(c, c.LocalAddr().String()); err != nil {
-			glog.Errorf("cannot exec tpl with addr: %s\n", c.LocalAddr().String())
+			log.WithError(err).WithField("LocalAddr", c.LocalAddr().String()).Errorln("Exec pac")
 		}
 		return
 	}
@@ -231,7 +239,7 @@ func (client *Client) connect(c net.Conn) {
 	// connect or reverse
 	method, requestURI, _, ok := parseRequestLine(string(requestLine))
 	if !ok {
-		glog.Errorf("malformed HTTP request: %s\n", requestLine)
+		log.WithField("requestLine", requestLine).Infoln("malformed HTTP request")
 		return
 	}
 	isConnect := method == "CONNECT"
@@ -239,13 +247,13 @@ func (client *Client) connect(c net.Conn) {
 	var req *http.Request
 	if isConnect {
 		if req, err = http.ReadRequest(bufConn); err != nil {
-			glog.Errorln(err)
+			log.Infoln(err)
 			return
 		}
 		req.Host, _ = hostPortNoPort(req.URL)
 	} else {
 		if req, err = client.newReverseRequest(requestURI); err != nil {
-			glog.Errorln(err)
+			log.Infoln(err)
 			return
 		}
 	}
@@ -262,7 +270,7 @@ func (client *Client) connect(c net.Conn) {
 
 	res, err := client.h2Transport.RoundTrip(req)
 	if err != nil {
-		glog.Errorln(err)
+		log.Errorln(err)
 		c.Write([]byte("HTTP/1.1 502 That's no street, Pete\r\n\r\n"))
 		return
 	}
@@ -274,7 +282,7 @@ func (client *Client) connect(c net.Conn) {
 
 	if isConnect {
 		if _, err = c.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
-			glog.Errorln(err)
+			log.Errorln(err)
 			return
 		}
 	}
@@ -286,14 +294,14 @@ func (client *Client) connect(c net.Conn) {
 	//	}
 	_, err = io.Copy(c, res.Body)
 	if err != nil {
-		glog.Errorln(err)
+		log.Errorln(err)
 	}
 }
 
 func checkRequestEnd(w *io.PipeWriter, c io.Reader) {
 	req, err := http.ReadRequest(bufio.NewReaderSize(io.TeeReader(c, w), h2FrameSize))
 	if err != nil {
-		glog.Errorln(err)
+		log.Errorln(err)
 		w.CloseWithError(err)
 		return
 	}

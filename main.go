@@ -3,12 +3,13 @@ package main
 import (
 	"flag"
 	"net"
+	"os"
 	"time"
 
 	"golang.org/x/net/http2"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/empirefox/wsh2c/client"
-	"github.com/golang/glog"
 	"github.com/gorilla/websocket"
 )
 
@@ -18,13 +19,19 @@ const (
 
 var (
 	parentPort = flag.String("port", "3128", "proxy serve port")
-	server     = flag.String("ws", "p2.pppome.tk:8000", "ws server as parent")
+	server     = flag.String("ws", "127.0.0.1:9999", "ws server as parent")
 	h2v        = flag.Bool("h2v", false, "enable http2 verbose logs")
 )
 
 func init() {
-	//	flag.Set("stderrthreshold", "INFO")
-	flag.Set("logtostderr", "true")
+	// Log as JSON instead of the default ASCII formatter.
+	log.SetFormatter(&log.TextFormatter{})
+
+	// Output to stderr instead of stdout, could also be a file.
+	log.SetOutput(os.Stderr)
+
+	// Only log the warning severity or above.
+	log.SetLevel(log.WarnLevel)
 }
 
 func main() {
@@ -45,7 +52,7 @@ func serveProxy() {
 		},
 		BufSize: bufSize,
 	}
-	glog.Fatalln(c.Run())
+	log.Error(c.Run())
 }
 
 func authorityAddr(authority string) (addr string) {

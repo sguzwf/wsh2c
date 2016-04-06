@@ -3,8 +3,9 @@
 	"GoVersion": "go1.6",
 	"Deps": [
 		{
-			"ImportPath": "github.com/golang/glog",
-			"Rev": "fca8c8854093a154ff1eb580aae10276ad6b1b5f"
+			"ImportPath": "github.com/Sirupsen/logrus",
+			"Comment": "v0.10.0",
+			"Rev": "4b6ea7319e214d98c938f12692336f7ca9348d6b"
 		},
 		{
 			"ImportPath": "github.com/gorilla/websocket",
@@ -13,6 +14,10 @@
 		{
 			"ImportPath": "golang.org/x/net/http2",
 			"Rev": "4876518f9e71663000c348837735820161a42df7"
+		},
+		{
+			"ImportPath": "golang.org/x/sys/unix",
+			"Rev": "042a8f53ce82bbe081222da955159491e32146a0"
 		}
 	]
 }

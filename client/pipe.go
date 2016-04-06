@@ -4,7 +4,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/websocket"
 )
 
@@ -16,7 +16,7 @@ func chanFromConn(conn net.Conn, bufSize int) chan []byte {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				glog.Errorln(err)
+				log.Errorln(err)
 			}
 		}()
 
@@ -42,7 +42,7 @@ func chanFromWs(ws *websocket.Conn) chan []byte {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				glog.Errorln(err)
+				log.Errorln(err)
 			}
 		}()
 
@@ -69,9 +69,9 @@ func (client *Client) pipe(conn net.Conn, ws *websocket.Conn) {
 
 	defer func() {
 		ticker.Stop()
-		glog.Infoln("quit pipe")
+		log.Infoln("quit pipe")
 		if err := recover(); err != nil {
-			glog.Infoln(err)
+			log.Infoln(err)
 		}
 	}()
 
@@ -85,7 +85,7 @@ func (client *Client) pipe(conn net.Conn, ws *websocket.Conn) {
 			} else {
 				// in write there is timeout set
 				if err := ws.WriteMessage(websocket.BinaryMessage, b); err != nil {
-					glog.Infoln("write request error", err)
+					log.Infoln("write request error", err)
 					return
 				}
 			}
@@ -94,13 +94,13 @@ func (client *Client) pipe(conn net.Conn, ws *websocket.Conn) {
 				return
 			} else {
 				if _, err := conn.Write(b); err != nil {
-					glog.Infoln("write response error", err)
+					log.Infoln("write response error", err)
 					return
 				}
 			}
 		case <-ticker.C:
 			if err := ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-				glog.Infoln("ping error", err)
+				log.Infoln("ping error", err)
 				return
 			}
 		}

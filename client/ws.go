@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/websocket"
 )
 
@@ -13,10 +13,10 @@ func NewWs(ws *websocket.Conn, bufSize int, pingPeriod time.Duration) *Ws {
 	ws.SetPongHandler(func(msg string) error {
 		sent, err := strconv.ParseInt(msg, 36, 64)
 		if err != nil {
-			glog.Warningln("Wrong pong time:", msg)
+			log.Warningln("Wrong pong time:", msg)
 			return nil
 		}
-		glog.Infof("Ping time: %dns\n", time.Now().UnixNano()-sent)
+		log.Infof("Ping time: %dns\n", time.Now().UnixNano()-sent)
 		return nil
 	})
 	return &Ws{
@@ -48,13 +48,13 @@ func (ws Ws) WriteText(b []byte) error {
 
 func (ws Ws) Write(b []byte) (written int, err error) {
 	err = ws.Conn.WriteMessage(websocket.BinaryMessage, b)
-	//	glog.Infoln("ws sent", len(b))
+	//	log.Infoln("ws sent", len(b))
 	return len(b), err
 }
 
 func (ws *Ws) Read(p []byte) (n int, err error) {
 	defer func() {
-		//		glog.Infoln("ws resv", n)
+		//		log.Infoln("ws resv", n)
 	}()
 	if ws.reader == nil {
 		var t int
@@ -125,7 +125,7 @@ func (ws *Ws) WriteTo(w io.Writer) (written int64, err error) {
 func (ws *Ws) Ping() {
 	ticker := time.NewTicker(ws.pingPeriod)
 	defer func() {
-		glog.Infoln("ping ticker stop")
+		log.Infoln("ping ticker stop")
 		ticker.Stop()
 		ws.Close()
 	}()
@@ -135,7 +135,7 @@ func (ws *Ws) Ping() {
 		case <-ticker.C:
 			unixnano := strconv.FormatInt(time.Now().UnixNano(), 36)
 			if err := ws.WriteMessage(websocket.PingMessage, []byte(unixnano)); err != nil {
-				glog.Errorln(err)
+				log.Errorln(err)
 				return
 			}
 		}
