@@ -24,13 +24,13 @@ _testmain.go
 #Godeps
 #Godeps/_workspace
 
-wsh2c
-.externalToolBuilders
-
 log
 public
 
 .project
 .settings
 
+wsh2c
 wsh2c-android-16-*
+wsh
+wsh-android-16-*

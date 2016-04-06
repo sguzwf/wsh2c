@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"text/template"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -25,8 +26,9 @@ const (
 )
 
 var (
-	HOST      = "i:80"
-	ErrWsInit = errors.New("Cannot init ws!")
+	HOST         = "i:80"
+	ErrWsInit    = errors.New("Cannot init ws!")
+	PacReqPrefix = []byte("GET /pac HTTP/1.")
 )
 
 type Client struct {
@@ -37,6 +39,7 @@ type Client struct {
 	BufSize      int
 	h2Transport  http.RoundTripper
 	h2ReverseReq http.Request
+	pacTpl       *template.Template
 }
 
 func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
@@ -97,8 +100,13 @@ func (client *Client) initWs() (err error) {
 		if res, rerr := http.ReadResponse(resReader, nil); rerr != nil {
 			glog.Errorln("Init Ws err:", rerr)
 			err = rerr
-		} else if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusFound {
-			glog.Infoln(res.StatusCode)
+		} else if res.StatusCode == http.StatusOK {
+			defer res.Body.Close()
+			if body, berr := ioutil.ReadAll(res.Body); berr != nil {
+				err = berr
+			} else {
+				client.pacTpl = template.Must(template.New("pac").Parse(string(body)))
+			}
 		} else {
 			glog.Infoln(resBuf.String())
 			err = ErrWsInit
@@ -114,7 +122,7 @@ func (client *Client) initWs() (err error) {
 	return
 }
 
-func (client *Client) Run(ok chan<- struct{}) error {
+func (client *Client) Run() error {
 	if err := client.initReverseRequest(); err != nil {
 		return err
 	}
@@ -128,9 +136,8 @@ func (client *Client) Run(ok chan<- struct{}) error {
 		return err
 	}
 	defer l.Close()
-	fmt.Println(">>>>>>>>>>>>>>> OK our parent is on port", client.Port)
+	fmt.Println(">>>>>>>>>>>>>>> OK our proxy is on port", client.Port)
 	fmt.Println(">>>>>>>>>>>>>>> Enjoy your life now!")
-	ok <- struct{}{}
 
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
@@ -212,6 +219,16 @@ func (client *Client) connect(c net.Conn) {
 		glog.Errorln(err)
 		return
 	}
+
+	// pac
+	if bytes.HasPrefix(requestLine, PacReqPrefix) {
+		if err := client.pacTpl.Execute(c, c.LocalAddr().String()); err != nil {
+			glog.Errorf("cannot exec tpl with addr: %s\n", c.LocalAddr().String())
+		}
+		return
+	}
+
+	// connect or reverse
 	method, requestURI, _, ok := parseRequestLine(string(requestLine))
 	if !ok {
 		glog.Errorf("malformed HTTP request: %s\n", requestLine)
