@@ -100,6 +100,10 @@ func (client *Client) newH2Transport() http.RoundTripper {
 }
 
 func (client *Client) initWs() (err error) {
+	if client.pacTpl != nil {
+		return nil
+	}
+
 	cc, cs := net.Pipe()
 
 	go func() {
