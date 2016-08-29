@@ -18,7 +18,7 @@ const (
 
 	wsHandshakeTimeout time.Duration = 20 * time.Second
 
-	defaultProxy = "7777:7778,ws://o.pppome.tk:8000,54.173.137.93|7779,ws://h.pppome.tk"
+	defaultProxy = "7777,ws://127.0.0.1:9999"
 )
 
 var (
