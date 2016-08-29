@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"text/template"
 	"time"
@@ -33,7 +34,7 @@ var (
 
 type Client struct {
 	Port         string
-	Server       string
+	ServerUrl    *url.URL
 	PingPeriod   time.Duration
 	Dialer       websocket.Dialer
 	BufSize      int
@@ -45,7 +46,7 @@ type Client struct {
 func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (c net.Conn, err error) {
 	if c, err = client.dialProxyTLS(network, addr, cfg); err != nil {
 		log.WithFields(log.Fields{
-			"server":     client.Server,
+			"server":     client.ServerUrl.Host,
 			"tls.server": cfg.ServerName,
 		}).Errorln(err)
 	}
@@ -53,7 +54,7 @@ func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (c net
 }
 
 func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
-	ws, _, err := client.Dialer.Dial(fmt.Sprintf("ws://%s/h2p", client.Server), nil)
+	ws, _, err := client.Dialer.Dial(client.ServerUrl.String()+"/h2p", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.C
 	}()
 
 	pc := NewWs(ws, client.BufSize, client.PingPeriod)
-	u := url.URL{Host: client.Server}
+	u := url.URL{Host: client.ServerUrl.Host}
 	_, hostNoPort := hostPortNoPort(&u)
 	cfg.ServerName = hostNoPort
 	cn := tls.Client(pc, cfg)
@@ -87,15 +88,48 @@ func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.C
 	}
 	closeWs = nil
 	log.Infoln("DailTLS ok")
+	go client.ping(ws)
 	return cn, nil
 }
 
 func (client *Client) newH2Transport() http.RoundTripper {
 	return &http2.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: os.Getenv("TEST_MODE") == "1",
 		},
 		DialTLS: client.DialProxyTLS,
+	}
+}
+
+func (client *Client) ping(ws *websocket.Conn) {
+	ticker := time.NewTicker(client.PingPeriod)
+	defer func() {
+		ticker.Stop()
+		ws.Close()
+		log.Infoln("Ws closed")
+	}()
+
+	req := &http.Request{
+		Method: "HEAD",
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   client.ServerUrl.Host,
+			Path:   "/",
+		},
+		Host:       HOST,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			res, err := client.h2Transport.RoundTrip(req)
+			if err != nil || res.StatusCode != http.StatusOK {
+				return
+			}
+		}
 	}
 }
 
@@ -134,9 +168,7 @@ func (client *Client) initWs() (err error) {
 }
 
 func (client *Client) Run() error {
-	if err := client.initReverseRequest(); err != nil {
-		return err
-	}
+	client.initReverseRequest()
 	client.h2Transport = client.newH2Transport()
 	if err := client.initWs(); err != nil {
 		return err
@@ -174,25 +206,23 @@ func (client *Client) Run() error {
 	}
 }
 
-func (client *Client) initReverseRequest() error {
-	u, err := url.Parse(client.Server)
-	if err != nil {
-		return err
-	}
+func (client *Client) initReverseRequest() {
+	u := *client.ServerUrl
+	//	u.Host => proxy
 	u.Opaque = ""
 	u.Scheme = "https"
 	u.Path = "/r"
 	client.h2ReverseReq = http.Request{
 		Method:     "POST",
-		URL:        u,
+		URL:        &u,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
-		Host:       u.Host,
 	}
-	return nil
 }
 
+// Extract target host, we only need that. The request is replayed to proxy server.
+// The underline url is pointing to proxy server.
 func (client *Client) newReverseRequest(requestURI string) (*http.Request, error) {
 	reqUrl, err := url.ParseRequestURI(requestURI)
 	if err != nil {
@@ -203,7 +233,7 @@ func (client *Client) newReverseRequest(requestURI string) (*http.Request, error
 	u := *req.URL
 	req.URL = &u
 	req.Header = make(http.Header)
-	req.Host, _ = hostPortNoPort(reqUrl)
+	req.Host, _ = hostPortNoPort(reqUrl) // => authority|target
 	return &req, nil
 }
 
@@ -214,6 +244,32 @@ func (client *Client) Connect(c net.Conn) {}
 // @@ RoundTripOpt
 // - addr := authorityAddr(req.URL.Host)
 // + addr := req.RemoteAddr
+//
+// +++>
+//	go cc.readLoop()
+//	go cc.pingLoop()
+//	return cc, nil
+//}
+//
+//func (cc *ClientConn) pingLoop() {
+//	var data [8]byte
+//	ticker := time.NewTicker(time.Second * 30)
+//	defer ticker.Stop()
+//	for {
+//		select {
+//		case <-cc.readerDone:
+//			logrus.Infoln("ClientConn readerDone")
+//			return
+//		case <-ticker.C:
+//			sec := strconv.FormatInt(time.Now().Unix(), 36) + "__"
+//			copy(data[:], sec[:8])
+//			if err := cc.fr.WritePing(false, data); err != nil {
+//				logrus.Errorln(err)
+//				return
+//			}
+//		}
+//	}
+//}
 //
 // Another implements https://github.com/fangdingjun/net
 // For now we choose smallest modification for original code
@@ -254,15 +310,16 @@ func (client *Client) connect(c net.Conn) {
 			log.Infoln(err)
 			return
 		}
-		req.Host, _ = hostPortNoPort(req.URL)
+		req.Host, _ = hostPortNoPort(req.URL) // => authority|target
 	} else {
 		if req, err = client.newReverseRequest(requestURI); err != nil {
 			log.Infoln(err)
 			return
 		}
 	}
-	req.RemoteAddr = client.Server // This field is ignored by the HTTP client.
+	//	req.RemoteAddr = client.Server // This field is ignored by the HTTP client.
 	req.URL.Scheme = "https"
+	req.URL.Host = client.ServerUrl.Host
 	req.ContentLength = -1
 	if isConnect {
 		req.Body = ioutil.NopCloser(bufConn)
@@ -274,7 +331,7 @@ func (client *Client) connect(c net.Conn) {
 
 	res, err := client.h2Transport.RoundTrip(req)
 	if err != nil {
-		log.Errorln(err)
+		log.WithError(err).WithField("res", res).Infoln("h2 RoundTrip")
 		c.Write([]byte("HTTP/1.1 502 That's no street, Pete\r\n\r\n"))
 		return
 	}
@@ -285,10 +342,7 @@ func (client *Client) connect(c net.Conn) {
 	}
 
 	if isConnect {
-		if _, err = c.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
-			log.Errorln(err)
-			return
-		}
+		c.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	}
 
 	//	if isConnect {
@@ -298,14 +352,13 @@ func (client *Client) connect(c net.Conn) {
 	//	}
 	_, err = io.Copy(c, res.Body)
 	if err != nil {
-		log.Errorln(err)
+		log.Infoln(err)
 	}
 }
 
 func checkRequestEnd(w *io.PipeWriter, c io.Reader) {
 	req, err := http.ReadRequest(bufio.NewReaderSize(io.TeeReader(c, w), h2FrameSize))
 	if err != nil {
-		log.Errorln(err)
 		w.CloseWithError(err)
 		return
 	}
@@ -326,6 +379,7 @@ func parseRequestLine(requestLine string) (method, requestURI, proto string, ok 
 	return requestLine[:s1], requestLine[s1+1 : s2], requestLine[s2+1:], true
 }
 
+// convert from net/textproto/reader.go:Reader.upcomingHeaderNewlines
 func peekRequestLine(r *bufio.Reader) ([]byte, error) {
 	r.Peek(1) // force a buffer load if empty
 	s := r.Buffered()

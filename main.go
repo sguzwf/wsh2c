@@ -15,12 +15,15 @@ import (
 
 const (
 	bufSize = 32 << 10
+
+	wsHandshakeTimeout time.Duration = 20 * time.Second
+
+	defaultProxy = "7777:7778,ws://o.pppome.tk:8000,54.173.137.93|7779,ws://h.pppome.tk"
 )
 
 var (
-	parentPort = flag.String("port", "3128", "proxy serve port")
-	server     = flag.String("ws", "127.0.0.1:9999", "ws server as parent")
-	h2v        = flag.Bool("h2v", false, "enable http2 verbose logs")
+	p   = flag.String("p", defaultProxy, "proxy command")
+	h2v = flag.Bool("h2v", false, "enable http2 verbose logs")
 )
 
 func init() {
@@ -31,20 +34,32 @@ func init() {
 	log.SetOutput(os.Stderr)
 
 	// Only log the warning severity or above.
-	log.SetLevel(log.WarnLevel)
+	log.SetLevel(log.InfoLevel)
 }
 
 func main() {
 	flag.Parse()
-	serveProxy()
-}
-
-func serveProxy() {
 	http2.VerboseLogs = *h2v
 
+	ps, err := parseProxy(*p)
+	if err != nil {
+		log.Fatalf("invalid proxy command: %s", err)
+	}
+
+	c := make(chan struct{})
+	for _, p := range ps {
+		for _, port := range p.ports {
+			go serveProxy(port, p, c)
+		}
+	}
+	<-c
+}
+
+func serveProxy(port string, p *proxy, quit chan<- struct{}) {
+
 	c := &client.Client{
-		Port:       *parentPort,
-		Server:     authorityAddr(*server),
+		Port:       port,
+		ServerUrl:  p.serverUrl,
 		PingPeriod: time.Second * 40,
 		Dialer: websocket.Dialer{
 			ReadBufferSize:  bufSize,
@@ -52,12 +67,16 @@ func serveProxy() {
 		},
 		BufSize: bufSize,
 	}
-	log.Error(c.Run())
-}
 
-func authorityAddr(authority string) (addr string) {
-	if _, _, err := net.SplitHostPort(authority); err == nil {
-		return authority
+	if p.tcpIp != "" {
+		c.Dialer.NetDial = func(network, addr string) (net.Conn, error) {
+			dialer := &net.Dialer{Deadline: time.Now().Add(wsHandshakeTimeout)}
+			return dialer.Dial(network, p.tcpIp)
+		}
+	} else {
+		c.Dialer.HandshakeTimeout = wsHandshakeTimeout
 	}
-	return net.JoinHostPort(authority, "80")
+
+	log.Error(c.Run())
+	quit <- struct{}{}
 }

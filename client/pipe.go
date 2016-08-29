@@ -69,9 +69,10 @@ func (client *Client) pipe(conn net.Conn, ws *websocket.Conn) {
 
 	defer func() {
 		ticker.Stop()
-		log.Infoln("quit pipe")
 		if err := recover(); err != nil {
-			log.Infoln(err)
+			log.WithField("err", err).Errorln("quit pipe")
+		} else {
+			log.Errorln("quit pipe")
 		}
 	}()
 
