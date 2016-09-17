@@ -13,167 +13,49 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
 	"golang.org/x/net/http2"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/Sirupsen/logrus"
 	"github.com/gorilla/websocket"
 )
 
 const (
-	h2FrameSize = 16 << 10
+	h2FrameSize = 64 << 10
+
+	HOST_OK   = "i:80"
+	HOST_INFO = "i:81"
+	HOST_PAC  = "i:82"
 )
 
 var (
-	HOST         = "i:80"
-	ErrWsInit    = errors.New("Cannot init ws!")
-	PacReqPrefix = []byte("GET /pac HTTP/1.")
+	log = logrus.New()
 )
 
 type Client struct {
-	Port         string
-	ServerUrl    *url.URL
-	PingPeriod   time.Duration
-	Dialer       websocket.Dialer
-	BufSize      int
+	Port       string
+	ServerUrl  *url.URL
+	PingPeriod time.Duration
+	Dialer     websocket.Dialer
+	BufSize    int
+	PacTpl     *template.Template
+
 	h2Transport  http.RoundTripper
 	h2ReverseReq http.Request
-	pacTpl       *template.Template
+
+	serverInfo   *ServerInfo
+	muServerInfo sync.Mutex
 }
 
-func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (c net.Conn, err error) {
-	if c, err = client.dialProxyTLS(network, addr, cfg); err != nil {
-		log.WithFields(log.Fields{
-			"server":     client.ServerUrl.Host,
-			"tls.server": cfg.ServerName,
-		}).Errorln(err)
-	}
-	return
-}
-
-func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
-	ws, _, err := client.Dialer.Dial(client.ServerUrl.String()+"/h2p", nil)
-	if err != nil {
-		return nil, err
-	}
-	closeWs := ws
-	defer func() {
-		if closeWs != nil {
-			closeWs.Close()
-		}
-	}()
-
-	pc := NewWs(ws, client.BufSize, client.PingPeriod)
-	u := url.URL{Host: client.ServerUrl.Host}
-	_, hostNoPort := hostPortNoPort(&u)
-	cfg.ServerName = hostNoPort
-	cn := tls.Client(pc, cfg)
-
-	if err := cn.Handshake(); err != nil {
-		return nil, err
-	}
-	if !cfg.InsecureSkipVerify {
-		if err := cn.VerifyHostname(cfg.ServerName); err != nil {
-			return nil, err
-		}
-	}
-	state := cn.ConnectionState()
-	if p := state.NegotiatedProtocol; p != http2.NextProtoTLS {
-		return nil, fmt.Errorf("http2: unexpected ALPN protocol %q; want %q", p, http2.NextProtoTLS)
-	}
-	if !state.NegotiatedProtocolIsMutual {
-		return nil, errors.New("http2: could not negotiate protocol mutually")
-	}
-	closeWs = nil
-	log.Infoln("DailTLS ok")
-	go client.ping(ws)
-	return cn, nil
-}
-
-func (client *Client) newH2Transport() http.RoundTripper {
-	return &http2.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: os.Getenv("TEST_MODE") == "1",
-		},
-		DialTLS: client.DialProxyTLS,
-	}
-}
-
-func (client *Client) ping(ws *websocket.Conn) {
-	ticker := time.NewTicker(client.PingPeriod)
-	defer func() {
-		ticker.Stop()
-		ws.Close()
-		log.Infoln("Ws closed")
-	}()
-
-	req := &http.Request{
-		Method: "HEAD",
-		URL: &url.URL{
-			Scheme: "https",
-			Host:   client.ServerUrl.Host,
-			Path:   "/",
-		},
-		Host:       HOST,
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			res, err := client.h2Transport.RoundTrip(req)
-			if err != nil || res.StatusCode != http.StatusOK {
-				return
-			}
-		}
-	}
-}
-
-func (client *Client) initWs() (err error) {
-	if client.pacTpl != nil {
-		return nil
-	}
-
-	cc, cs := net.Pipe()
-
-	go func() {
-		var resBuf bytes.Buffer
-		resReader := bufio.NewReader(io.TeeReader(cc, &resBuf))
-		if res, rerr := http.ReadResponse(resReader, nil); rerr != nil {
-			err = rerr
-		} else if res.StatusCode == http.StatusOK {
-			defer res.Body.Close()
-			if body, berr := ioutil.ReadAll(res.Body); berr != nil {
-				err = berr
-			} else {
-				client.pacTpl = template.Must(template.New("pac").Parse(string(body)))
-			}
-		} else {
-			log.Infoln(resBuf.String())
-			err = ErrWsInit
-		}
-	}()
-
-	go func() {
-		rawReq := []byte(fmt.Sprintf("GET http://%s/ HTTP/1.1\r\nHost: %s\r\n\r\n", HOST, HOST))
-		cc.Write(rawReq)
-	}()
-
-	client.connect(cs)
-	return
+func (client *Client) PreRun() {
+	client.initReverseRequest()
+	client.h2Transport = client.newH2Transport()
 }
 
 func (client *Client) Run() error {
-	client.initReverseRequest()
-	client.h2Transport = client.newH2Transport()
-	if err := client.initWs(); err != nil {
-		return err
-	}
-
 	l, err := net.Listen("tcp", ":"+client.Port)
 	if err != nil {
 		return err
@@ -206,6 +88,15 @@ func (client *Client) Run() error {
 	}
 }
 
+func (client *Client) newH2Transport() http.RoundTripper {
+	return &http2.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: os.Getenv("TEST_MODE") == "1",
+		},
+		DialTLS: client.DialProxyTLS,
+	}
+}
+
 func (client *Client) initReverseRequest() {
 	u := *client.ServerUrl
 	//	u.Host => proxy
@@ -223,10 +114,10 @@ func (client *Client) initReverseRequest() {
 
 // Extract target host, we only need that. The request is replayed to proxy server.
 // The underline url is pointing to proxy server.
-func (client *Client) newReverseRequest(requestURI string) (*http.Request, error) {
+func (client *Client) newReverseRequest(requestURI string) (*http.Request, *url.URL, error) {
 	reqUrl, err := url.ParseRequestURI(requestURI)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	req := client.h2ReverseReq
@@ -234,42 +125,14 @@ func (client *Client) newReverseRequest(requestURI string) (*http.Request, error
 	req.URL = &u
 	req.Header = make(http.Header)
 	req.Host, _ = hostPortNoPort(reqUrl) // => authority|target
-	return &req, nil
+	return &req, reqUrl, nil
 }
-
-func (client *Client) Connect(c net.Conn) {}
 
 // golang/x/net/http2
 //
 // @@ RoundTripOpt
 // - addr := authorityAddr(req.URL.Host)
 // + addr := req.RemoteAddr
-//
-// +++>
-//	go cc.readLoop()
-//	go cc.pingLoop()
-//	return cc, nil
-//}
-//
-//func (cc *ClientConn) pingLoop() {
-//	var data [8]byte
-//	ticker := time.NewTicker(time.Second * 30)
-//	defer ticker.Stop()
-//	for {
-//		select {
-//		case <-cc.readerDone:
-//			logrus.Infoln("ClientConn readerDone")
-//			return
-//		case <-ticker.C:
-//			sec := strconv.FormatInt(time.Now().Unix(), 36) + "__"
-//			copy(data[:], sec[:8])
-//			if err := cc.fr.WritePing(false, data); err != nil {
-//				logrus.Errorln(err)
-//				return
-//			}
-//		}
-//	}
-//}
 //
 // Another implements https://github.com/fangdingjun/net
 // For now we choose smallest modification for original code
@@ -284,15 +147,6 @@ func (client *Client) connect(c net.Conn) {
 	bufConn := bufio.NewReader(c)
 	requestLine, err := peekRequestLine(bufConn)
 	if err != nil {
-		log.Infoln(err)
-		return
-	}
-
-	// pac
-	if bytes.HasPrefix(requestLine, PacReqPrefix) {
-		if err := client.pacTpl.Execute(c, c.LocalAddr().String()); err != nil {
-			log.WithError(err).WithField("LocalAddr", c.LocalAddr().String()).Errorln("Exec pac")
-		}
 		return
 	}
 
@@ -312,9 +166,22 @@ func (client *Client) connect(c net.Conn) {
 		}
 		req.Host, _ = hostPortNoPort(req.URL) // => authority|target
 	} else {
-		if req, err = client.newReverseRequest(requestURI); err != nil {
+		// reqUrl is the raw parsed url, used for checking pac request
+		var reqUrl *url.URL
+		if req, reqUrl, err = client.newReverseRequest(requestURI); err != nil {
 			log.Infoln(err)
 			return
+		}
+
+		// check if it is a pac request
+		if reqUrl.Path == "/pac" && method == "GET" {
+			if reqUrl.Host == "" || reqUrl.Host == c.LocalAddr().String() {
+				// pac
+				if err = client.PacTpl.Execute(c, c.LocalAddr().String()); err != nil {
+					log.WithError(err).WithField("LocalAddr", c.LocalAddr().String()).Errorln("Exec pac")
+				}
+				return
+			}
 		}
 	}
 	//	req.RemoteAddr = client.Server // This field is ignored by the HTTP client.

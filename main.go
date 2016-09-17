@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	bufSize = 32 << 10
+	bufSize = 65 << 10
 
 	wsHandshakeTimeout time.Duration = 20 * time.Second
 
@@ -46,17 +46,32 @@ func main() {
 		log.Fatalf("invalid proxy command: %s", err)
 	}
 
-	c := make(chan struct{})
+	var clients []*client.Client
 	for _, p := range ps {
 		for _, port := range p.ports {
-			go serveProxy(port, p, c)
+			clients = append(clients, newClient(port, p))
 		}
 	}
-	<-c
+
+	pac, err := clients[0].FetchPac()
+	if err != nil {
+		log.Fatalf("fetch pac: %s", err)
+	}
+
+	quit := make(chan struct{})
+	for _, c := range clients {
+		c.PacTpl = pac
+		go serveProxy(c, quit)
+	}
+	<-quit
 }
 
-func serveProxy(port string, p *proxy, quit chan<- struct{}) {
+func serveProxy(c *client.Client, quit chan struct{}) {
+	log.Errorln(c.Run())
+	quit <- struct{}{}
+}
 
+func newClient(port string, p *proxy) *client.Client {
 	c := &client.Client{
 		Port:       port,
 		ServerUrl:  p.serverUrl,
@@ -77,6 +92,7 @@ func serveProxy(port string, p *proxy, quit chan<- struct{}) {
 		c.Dialer.HandshakeTimeout = wsHandshakeTimeout
 	}
 
-	log.Error(c.Run())
-	quit <- struct{}{}
+	c.PreRun()
+
+	return c
 }
