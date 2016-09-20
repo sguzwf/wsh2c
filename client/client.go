@@ -36,6 +36,10 @@ var (
 	log = logrus.New()
 )
 
+func SetLogLevel(level logrus.Level) {
+	log.Level = level
+}
+
 type Client struct {
 	Port       string
 	ServerUrl  *url.URL
@@ -77,7 +81,7 @@ func (client *Client) Run() error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				log.Infoln("http: Accept error: %v; retrying in %v\n", e, tempDelay)
+				log.Debugf("http: Accept error: %v; retrying in %v\n", e, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -139,7 +143,7 @@ func (client *Client) newReverseRequest(requestURI string) (*http.Request, *url.
 func (client *Client) connect(c net.Conn) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Errorln(err)
+			log.WithField("port", client.Port).Errorln("recover", err)
 		}
 	}()
 	defer c.Close()
@@ -160,7 +164,8 @@ func (client *Client) connect(c net.Conn) {
 	var req *http.Request
 	if isConnect {
 		if req, err = http.ReadRequest(bufConn); err != nil {
-			log.Infoln(err)
+			log.WithError(err).Debugln(requestURI)
+			c.Write([]byte("HTTP/1.1 400 Bad Request Connect\r\n\r\n"))
 			return
 		}
 		req.Close = false
@@ -170,7 +175,8 @@ func (client *Client) connect(c net.Conn) {
 		// reqUrl is the raw parsed url, used for checking pac request
 		var reqUrl *url.URL
 		if req, reqUrl, err = client.newReverseRequest(requestURI); err != nil {
-			log.Infoln(err)
+			log.WithError(err).Debugln(requestURI)
+			c.Write([]byte("HTTP/1.1 400 Bad Request Reverse\r\n\r\n"))
 			return
 		}
 
@@ -199,7 +205,7 @@ func (client *Client) connect(c net.Conn) {
 
 	res, err := client.h2Transport.RoundTrip(req)
 	if err != nil {
-		log.WithError(err).WithField("res", res).Infoln("h2 RoundTrip")
+		log.WithError(err).Debugln("h2RoundTrip")
 		c.Write([]byte("HTTP/1.1 502 That's no street, Pete\r\n\r\n"))
 		return
 	}
@@ -220,7 +226,7 @@ func (client *Client) connect(c net.Conn) {
 	//	}
 	_, err = io.Copy(c, res.Body)
 	if err != nil {
-		log.Infoln(err)
+		log.Debugln(err)
 	}
 }
 

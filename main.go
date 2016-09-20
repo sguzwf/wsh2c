@@ -36,6 +36,8 @@ func init() {
 
 	// Only log the warning severity or above.
 	log.SetLevel(log.InfoLevel)
+
+	client.SetLogLevel(log.InfoLevel)
 }
 
 func main() {
