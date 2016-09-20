@@ -36,8 +36,12 @@ func (client *Client) getServerInfo() (*ServerInfo, error) {
 	return client.serverInfo, nil
 }
 
-func (client *Client) FetchPac() (*template.Template, error) {
-	body, err := client.fetch("GET", HOST_PAC)
+func (client *Client) FetchPac(update bool) (*template.Template, error) {
+	host := HOST_PAC
+	if update {
+		host = HOST_PAC_UPDATE
+	}
+	body, err := client.fetch("GET", host)
 	if err != nil {
 		return nil, err
 	}

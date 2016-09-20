@@ -15,7 +15,7 @@ func chanFromConn(conn net.Conn, bufSize int) chan []byte {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Errorln(err)
+				log.WithField("from", "conn").Errorln(err)
 			}
 		}()
 
@@ -41,7 +41,7 @@ func chanFromWs(ws *websocket.Conn) chan []byte {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Errorln(err)
+				log.WithField("from", "ws").Errorln(err)
 			}
 		}()
 
@@ -69,9 +69,7 @@ func (client *Client) pipe(conn net.Conn, ws *websocket.Conn) {
 	defer func() {
 		ticker.Stop()
 		if err := recover(); err != nil {
-			log.WithField("err", err).Errorln("quit pipe")
-		} else {
-			log.Errorln("quit pipe")
+			log.WithField("port", client.Port).Errorln(err)
 		}
 	}()
 
@@ -85,7 +83,7 @@ func (client *Client) pipe(conn net.Conn, ws *websocket.Conn) {
 			} else {
 				// in write there is timeout set
 				if err := ws.WriteMessage(websocket.BinaryMessage, b); err != nil {
-					log.Infoln("write request error", err)
+					log.WithField("port", client.Port).Infoln("write request error", err)
 					return
 				}
 			}
@@ -94,13 +92,13 @@ func (client *Client) pipe(conn net.Conn, ws *websocket.Conn) {
 				return
 			} else {
 				if _, err := conn.Write(b); err != nil {
-					log.Infoln("write response error", err)
+					log.WithField("port", client.Port).Infoln("write response error", err)
 					return
 				}
 			}
 		case <-ticker.C:
 			if err := ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-				log.Infoln("ping error", err)
+				log.WithField("port", client.Port).Infoln("ping error", err)
 				return
 			}
 		}

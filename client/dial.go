@@ -18,6 +18,7 @@ import (
 func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (c net.Conn, err error) {
 	if c, err = client.dialProxyTLS(network, addr, cfg); err != nil {
 		log.WithFields(logrus.Fields{
+			"lport":  client.Port,
 			"server": client.ServerUrl.Host,
 		}).Errorln(err)
 	}
@@ -58,7 +59,7 @@ func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.C
 		return nil, errors.New("http2: could not negotiate protocol mutually")
 	}
 	closeWs = nil
-	log.Infoln("DailTLS ok")
+	log.WithField("port", client.Port).Infoln("DailTLS ok")
 	go client.ping(ws)
 	return cn, nil
 }
@@ -66,7 +67,7 @@ func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.C
 func (client *Client) ping(ws *websocket.Conn) {
 	info, err := client.getServerInfo()
 	if err != nil {
-		log.Errorln("getServerInfo", err)
+		log.WithField("port", client.Port).Errorln("getServerInfo", err)
 		return
 	}
 
@@ -74,8 +75,9 @@ func (client *Client) ping(ws *websocket.Conn) {
 	defer func() {
 		ticker.Stop()
 		ws.Close()
-		log.Infoln("Ws closed")
+		log.WithField("port", client.Port).Infoln("Ws closed")
 	}()
+	log.WithField("port", client.Port).Infoln("Ws started")
 
 	req := client.innerRequest("HEAD", HOST_OK)
 

@@ -26,9 +26,10 @@ import (
 const (
 	h2FrameSize = 64 << 10
 
-	HOST_OK   = "i:80"
-	HOST_INFO = "i:81"
-	HOST_PAC  = "i:82"
+	HOST_OK         = "i:80"
+	HOST_INFO       = "i:81"
+	HOST_PAC        = "i:82"
+	HOST_PAC_UPDATE = "i:83"
 )
 
 var (
@@ -62,7 +63,6 @@ func (client *Client) Run() error {
 	}
 	defer l.Close()
 	fmt.Println(">>>>>>>>>>>>>>> OK proxy is on port", client.Port)
-	fmt.Println(">>>>>>>>>>>>>>> Enjoy your life now!")
 
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
@@ -153,7 +153,6 @@ func (client *Client) connect(c net.Conn) {
 	// connect or reverse
 	method, requestURI, _, ok := parseRequestLine(string(requestLine))
 	if !ok {
-		log.WithField("requestLine", requestLine).Infoln("malformed HTTP request")
 		return
 	}
 	isConnect := method == "CONNECT"

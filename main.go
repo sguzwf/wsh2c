@@ -23,6 +23,7 @@ const (
 
 var (
 	p   = flag.String("p", defaultProxy, "proxy command")
+	up  = flag.Bool("up", false, "update pac to server")
 	h2v = flag.Bool("h2v", false, "enable http2 verbose logs")
 )
 
@@ -53,9 +54,12 @@ func main() {
 		}
 	}
 
-	pac, err := clients[0].FetchPac()
+	pac, err := clients[0].FetchPac(*up)
 	if err != nil {
 		log.Fatalf("fetch pac: %s", err)
+	}
+	if *up {
+		os.Exit(0)
 	}
 
 	quit := make(chan struct{})
