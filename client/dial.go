@@ -59,7 +59,7 @@ func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.C
 		return nil, errors.New("http2: could not negotiate protocol mutually")
 	}
 	closeWs = nil
-	log.WithField("port", client.Port).Infoln("DailTLS ok")
+	log.WithField("port", client.Port).Infoln("DailTLS ok: " + addr)
 	go client.ping(ws)
 	return cn, nil
 }

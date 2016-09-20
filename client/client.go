@@ -163,6 +163,8 @@ func (client *Client) connect(c net.Conn) {
 			log.Infoln(err)
 			return
 		}
+		req.Close = false
+		req.Header = make(http.Header)
 		req.Host, _ = hostPortNoPort(req.URL) // => authority|target
 	} else {
 		// reqUrl is the raw parsed url, used for checking pac request
