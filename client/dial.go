@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -84,10 +85,13 @@ func (client *Client) ping(ws *websocket.Conn, addr string) {
 	for {
 		select {
 		case <-ticker.C:
-			res, err := client.h2Transport.RoundTrip(req)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			res, err := client.h2Transport.RoundTrip(req.WithContext(ctx))
 			if err != nil || res.StatusCode != http.StatusOK {
+				cancel()
 				return
 			}
+			cancel()
 		}
 	}
 }
