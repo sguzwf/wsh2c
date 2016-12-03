@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -93,11 +94,32 @@ func (client *Client) Run() error {
 }
 
 func (client *Client) newH2Transport() http.RoundTripper {
+	tlsConfig := tls.Config{
+		InsecureSkipVerify: os.Getenv("TEST_MODE") == "1",
+	}
+
+	if client.ServerUrl.Scheme == "tcp" {
+		// 1. LoadClientCert
+		cert, err := tls.LoadX509KeyPair("client.crt", "client.key")
+		if err != nil {
+			log.WithError(err).Fatal("loading server certificate")
+		}
+
+		// 2. LoadCACert
+		caCert, err := ioutil.ReadFile("chain.pem")
+		if err != nil {
+			log.WithError(err).Fatal("loading CA certificate")
+		}
+		caPool := x509.NewCertPool()
+		caPool.AppendCertsFromPEM(caCert)
+
+		tlsConfig.RootCAs = caPool
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
 	return &http2.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: os.Getenv("TEST_MODE") == "1",
-		},
-		DialTLS: client.DialProxyTLS,
+		TLSClientConfig: &tlsConfig,
+		DialTLS:         client.DialProxyTLS,
 	}
 }
 

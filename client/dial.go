@@ -17,7 +17,13 @@ import (
 )
 
 func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (c net.Conn, err error) {
-	if c, err = client.dialProxyTLS(network, addr, cfg); err != nil {
+	if client.ServerUrl.Scheme == "tcp" {
+		c, err = client.dialTcpTLS(network, addr, cfg)
+	} else {
+		c, err = client.dialWsTLS(network, addr, cfg)
+	}
+
+	if err != nil {
 		log.WithFields(logrus.Fields{
 			"port":   client.Port,
 			"server": client.ServerUrl.Host,
@@ -26,7 +32,31 @@ func (client *Client) DialProxyTLS(network, addr string, cfg *tls.Config) (c net
 	return
 }
 
-func (client *Client) dialProxyTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
+func (client *Client) dialTcpTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
+	cfg.ServerName = "server.h2.proxy"
+	cn, err := tls.Dial(network, addr, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := cn.Handshake(); err != nil {
+		return nil, err
+	}
+	if !cfg.InsecureSkipVerify {
+		if err := cn.VerifyHostname(cfg.ServerName); err != nil {
+			return nil, err
+		}
+	}
+	state := cn.ConnectionState()
+	if p := state.NegotiatedProtocol; p != http2.NextProtoTLS {
+		return nil, fmt.Errorf("http2: unexpected ALPN protocol %q; want %q", p, http2.NextProtoTLS)
+	}
+	if !state.NegotiatedProtocolIsMutual {
+		return nil, errors.New("http2: could not negotiate protocol mutually")
+	}
+	return cn, nil
+}
+
+func (client *Client) dialWsTLS(network, addr string, cfg *tls.Config) (net.Conn, error) {
 	ws, _, err := client.Dialer.Dial(client.ServerUrl.String()+"/p", nil)
 	if err != nil {
 		return nil, err
