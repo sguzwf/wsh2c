@@ -36,3 +36,7 @@ wsh2c-android-*
 wsh
 wsh-android-16-*
 wsh-android-*
+
+*.pem
+*.crt
+*.key

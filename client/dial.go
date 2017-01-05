@@ -5,13 +5,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/gorilla/websocket"
 
 	"golang.org/x/net/http2"
 )
@@ -53,6 +53,7 @@ func (client *Client) dialTcpTLS(network, addr string, cfg *tls.Config) (net.Con
 	if !state.NegotiatedProtocolIsMutual {
 		return nil, errors.New("http2: could not negotiate protocol mutually")
 	}
+	go client.ping(cn, addr)
 	return cn, nil
 }
 
@@ -94,7 +95,7 @@ func (client *Client) dialWsTLS(network, addr string, cfg *tls.Config) (net.Conn
 	return cn, nil
 }
 
-func (client *Client) ping(ws *websocket.Conn, addr string) {
+func (client *Client) ping(conn io.Closer, addr string) {
 	log.WithField("port", client.Port).Infoln("DailTLS ok: " + addr)
 	info, err := client.getServerInfo()
 	if err != nil {
@@ -105,10 +106,10 @@ func (client *Client) ping(ws *websocket.Conn, addr string) {
 	ticker := time.NewTicker(info.PingSecond * time.Second)
 	defer func() {
 		ticker.Stop()
-		ws.Close()
-		log.WithField("port", client.Port).Infoln("Ws closed")
+		conn.Close()
+		log.WithField("port", client.Port).Infoln("conn closed")
 	}()
-	log.WithField("port", client.Port).Infoln("Ws started")
+	log.WithField("port", client.Port).Infoln("conn started")
 
 	req := client.innerRequest("HEAD", HOST_OK)
 
