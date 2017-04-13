@@ -44,7 +44,10 @@ func main() {
 	flag.Parse()
 	http2.VerboseLogs = *h2v
 
-	ps, err := parseProxy(*p)
+	pc := *p
+	if pc == defaultProxy {
+	}
+	ps, err := parseProxy(pc)
 	if err != nil {
 		log.Fatalf("invalid proxy command: %s", err)
 	}

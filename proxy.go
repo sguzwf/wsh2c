@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -30,6 +32,26 @@ func parseProxy(r string) ([]*proxy, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		if serverUrl.Scheme == "http" || serverUrl.Scheme == "https" {
+			res, err := http.Get(parts[1])
+			if err != nil {
+				return nil, err
+			}
+			defer res.Body.Close()
+
+			var info map[string]string
+			err = json.NewDecoder(res.Body).Decode(&info)
+			if err != nil {
+				return nil, err
+			}
+			serverUrl = &url.URL{
+				Scheme: info["schema"],
+				Host:   info["bind"],
+			}
+			parts = parts[:2]
+		}
+
 		serverUrl.Host = authorityAddr(serverUrl.Scheme, serverUrl.Host)
 		p.serverUrl = serverUrl
 
@@ -40,6 +62,7 @@ func parseProxy(r string) ([]*proxy, error) {
 		}
 
 		ps = append(ps, &p)
+
 	}
 
 	return ps, nil
