@@ -20,13 +20,14 @@ const (
 )
 
 var (
-	p   = flag.String("p", "7777,ws://127.0.0.1:9999", "proxy command")
+	p   = flag.String("p", "7777,tcp://127.0.0.1:9999", "proxy command")
 	up  = flag.Bool("up", false, "update pac to server")
 	h2v = flag.Bool("h2v", false, "enable http2 verbose logs")
 
 	// compile time to set defaultProxy:
 	// go build -ldflags "-X main.defaultProxy=7777,$WSH_HTTP_PROXY"
-	defaultProxy string
+	defaultProxy  string
+	versionNumber string
 )
 
 func init() {
@@ -43,6 +44,10 @@ func init() {
 }
 
 func main() {
+	if versionNumber != "" {
+		log.Infoln("wsh client", versionNumber)
+	}
+
 	flag.Parse()
 	http2.VerboseLogs = *h2v
 
