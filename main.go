@@ -17,14 +17,16 @@ const (
 	bufSize = 65 << 10
 
 	wsHandshakeTimeout time.Duration = 20 * time.Second
-
-	defaultProxy = "7777,ws://127.0.0.1:9999"
 )
 
 var (
-	p   = flag.String("p", defaultProxy, "proxy command")
+	p   = flag.String("p", "7777,ws://127.0.0.1:9999", "proxy command")
 	up  = flag.Bool("up", false, "update pac to server")
 	h2v = flag.Bool("h2v", false, "enable http2 verbose logs")
+
+	// compile time to set defaultProxy:
+	// go build -ldflags "-X main.defaultProxy=7777,$WSH_HTTP_PROXY"
+	defaultProxy string
 )
 
 func init() {
@@ -44,10 +46,10 @@ func main() {
 	flag.Parse()
 	http2.VerboseLogs = *h2v
 
-	pc := *p
-	if pc == defaultProxy {
+	if defaultProxy == "" {
+		defaultProxy = *p
 	}
-	ps, err := parseProxy(pc)
+	ps, err := parseProxy(defaultProxy)
 	if err != nil {
 		log.Fatalf("invalid proxy command: %s", err)
 	}
