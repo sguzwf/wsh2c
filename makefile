@@ -4,11 +4,11 @@ WSH_HTTP_PROXY ?= tcp://127.0.0.1:9999
 
 install:
 	go get -d
-	go build -ldflags "-s -w -X main.defaultProxy=7777,7779,${WSH_HTTP_PROXY}" -o ${GOPATH}/bin/wsh
+	go build -ldflags "-s -w -X main.versionNumber=${VERSION} -X main.defaultProxy=7777,${WSH_HTTP_PROXY}" -o ${GOPATH}/bin/wsh
 
 build:
-		go get -d
-		go build -ldflags "-X main.defaultProxy=7777,${WSH_HTTP_PROXY}" -o wsh
+	go get -d
+	go build -ldflags "-X main.versionNumber=${VERSION} -X main.defaultProxy=7777,${WSH_HTTP_PROXY}" -o wsh
 # TODO learn for loop in makefile
 release:
 	go get -d
